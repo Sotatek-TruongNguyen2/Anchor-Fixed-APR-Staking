@@ -17,11 +17,12 @@ describe("solana-staking", () => {
 
   const LOCK_DURATION = 5;
 
-  let ruinStaking: PublicKey;
-  let ruinStakingTerm: PublicKey;
+  let ruinStaking: Keypair;
+  let ruinStakingTerm: Keypair;
   let ruinStakingTreasury: Keypair;
   let staker: Keypair;
   let deployerKeypair: Keypair;
+  let vaultAuthority: PublicKey;
   let userPendingWithdrawl: PublicKey;
   let userStaked: PublicKey;
   let deployer: PublicKey;
@@ -34,6 +35,8 @@ describe("solana-staking", () => {
     deployer = deployerKeypair.publicKey;
     staker = anchor.web3.Keypair.generate();
     ruinStakingTreasury = anchor.web3.Keypair.generate();
+    ruinStaking = anchor.web3.Keypair.generate();
+    ruinStakingTerm = anchor.web3.Keypair.generate();
 
     const signature = await program.provider.connection.requestAirdrop(deployer, 90000000000000);
     await program.provider.connection.confirmTransaction(signature, 'confirmed');
@@ -51,10 +54,10 @@ describe("solana-staking", () => {
     );
 
 
-    stakingToken = await createMint( 
+    stakingToken = await createMint(
       program.provider,
       deployer,
-      6 
+      6
     )
 
     stakerTokenAccount = await createTokenAccount(
@@ -72,60 +75,45 @@ describe("solana-staking", () => {
       deployerKeypair
     );
 
-    let [ruinStakingPubkey] = await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("staking"),
-          stakingToken.toBuffer(),
-          deployer.toBuffer(),
-          new anchor.BN(LOCK_DURATION).toArrayLike(Buffer),
-        ], 
-        program.programId,
-    );
-
-    let [ruinStakingTermPubkey] = await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("staking_term"),
-          stakingToken.toBuffer(),
-          deployer.toBuffer(),
-          new anchor.BN(LOCK_DURATION).toArrayLike(Buffer),
-        ], 
-        program.programId,
-    );
 
     let [distributorPubkey] = await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("distributor"),
-          stakingToken.toBuffer(),
-          deployer.toBuffer(),
-          new anchor.BN(LOCK_DURATION).toArrayLike(Buffer),
-        ], 
-        program.programId,
+      [
+        Buffer.from("distributor"),
+        stakingToken.toBuffer(),
+        deployer.toBuffer(),
+        new anchor.BN(LOCK_DURATION).toArrayLike(Buffer),
+      ],
+      program.programId,
     );
 
     distributorTokenAccount = distributorPubkey;
-    ruinStakingTerm = ruinStakingTermPubkey;
-    ruinStaking = ruinStakingPubkey;
 
     // ------------------         -------------------------
     let [userStakedPubkey] = await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("stake"),
-          ruinStaking.toBuffer(),
-          ruinStakingTerm.toBuffer(),
-          staker.publicKey.toBuffer()
-        ], 
-        program.programId,
+      [
+        Buffer.from("stake"),
+        ruinStaking.publicKey.toBuffer(),
+        ruinStakingTerm.publicKey.toBuffer(),
+        staker.publicKey.toBuffer()
+      ],
+      program.programId,
     );
 
-
     let [pendingWithdrawlPubkey] = await anchor.web3.PublicKey.findProgramAddress(
-        [
-          Buffer.from("withdraw_reward"),
-          ruinStaking.toBuffer(),
-          ruinStakingTerm.toBuffer(),
-          staker.publicKey.toBuffer()
-        ], 
-        program.programId,
+      [
+        Buffer.from("withdraw_reward"),
+        ruinStaking.publicKey.toBuffer(),
+        ruinStakingTerm.publicKey.toBuffer(),
+        staker.publicKey.toBuffer()
+      ],
+      program.programId,
+    );
+
+    let [vaultAuthorityPubkey] = await anchor.web3.PublicKey.findProgramAddress(
+      [
+        Buffer.from("vault-authority"),
+      ],
+      program.programId,
     );
 
     const startJoinTime = Math.floor(new Date().getTime() / 1000) - 3000;
@@ -144,8 +132,8 @@ describe("solana-staking", () => {
         {
           accounts: {
             ruinStakingTreasury: ruinStakingTreasury.publicKey,
-            ruinStakingTerm,
-            ruinStaking,
+            ruinStakingTerm: ruinStakingTerm.publicKey,
+            ruinStaking: ruinStaking.publicKey,
             ruinStakingAdmin: deployer,
             ruinStakingToken: stakingToken,
             ruinStakingDistributor: distributorTokenAccount,
@@ -155,7 +143,9 @@ describe("solana-staking", () => {
           },
           signers: [
             deployerKeypair,
-            ruinStakingTreasury
+            ruinStakingTreasury,
+            ruinStaking,
+            ruinStakingTerm,
           ]
         }
       )
@@ -165,6 +155,7 @@ describe("solana-staking", () => {
 
     userStaked = userStakedPubkey;
     userPendingWithdrawl = pendingWithdrawlPubkey;
+    vaultAuthority = vaultAuthorityPubkey;
 
     await mintToAccount(
       program.provider,
@@ -177,14 +168,14 @@ describe("solana-staking", () => {
   });
 
   it("Staking info system can be initialized", async () => {
-    const term = await program.account.ruinStakingTerm.fetch(ruinStakingTerm);
+    const term = await program.account.ruinStakingTerm.fetch(ruinStakingTerm.publicKey);
 
-    assert.equal(ruinStaking.toBase58(), term.ruinStaking.toBase58());
+    assert.equal(ruinStaking.publicKey.toBase58(), term.ruinStaking.toBase58());
     assert.equal(term.apr, 40000);
   });
 
   it("Staking info system can't be initialized if lacks any signature", async () => {
-   try  {
+    try {
       await program.rpc.initialize(
         new anchor.BN(10),
         new anchor.BN(200),
@@ -197,8 +188,8 @@ describe("solana-staking", () => {
         {
           accounts: {
             ruinStakingTreasury: ruinStakingTreasury.publicKey,
-            ruinStakingTerm: ruinStakingTerm,
-            ruinStaking: ruinStaking,
+            ruinStakingTerm: ruinStakingTerm.publicKey,
+            ruinStaking: ruinStaking.publicKey,
             ruinStakingAdmin: deployer,
             ruinStakingToken: stakingToken,
             ruinStakingDistributor: distributorTokenAccount,
@@ -218,29 +209,29 @@ describe("solana-staking", () => {
   });
 
   it("User able to stake token", async () => {
-    const staking = await program.account.ruinStaking.fetch(ruinStaking);
+    const staking = await program.account.ruinStaking.fetch(ruinStaking.publicKey);
     const balance = await program.provider.connection.getBalance(staker.publicKey);
     console.log(balance.toString());
 
     await program.rpc.stake(
-        new anchor.BN(100 * (10 ** 6)),
-        {
-          accounts: {
-            ruinStakingTerm: ruinStakingTerm,
-            ruinStaking: ruinStaking,
-            investor: staker.publicKey,
-            investorTokenAccount: stakerTokenAccount,
-            userPendingWithdrawl,
-            userStaked,
-            treasuryTokenAccount: staking.treasury,
-            systemProgram: anchor.web3.SystemProgram.programId,
-            tokenProgram: spl.TOKEN_PROGRAM_ID,
-            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-          },
-          signers: [
-            staker
-          ]
-        }
+      new anchor.BN(100 * (10 ** 6)),
+      {
+        accounts: {
+          ruinStakingTerm: ruinStakingTerm.publicKey,
+          ruinStaking: ruinStaking.publicKey,
+          investor: staker.publicKey,
+          investorTokenAccount: stakerTokenAccount,
+          userPendingWithdrawl,
+          userStaked,
+          treasuryTokenAccount: staking.treasury,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: spl.TOKEN_PROGRAM_ID,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        },
+        signers: [
+          staker
+        ]
+      }
     )
 
     const pendingWithdrawlResp = await program.account.pendingRewardWithdrawl.fetch(userPendingWithdrawl);
@@ -248,67 +239,67 @@ describe("solana-staking", () => {
   });
 
   it("User able to harvest reward when time's passed", async () => {
-    const staking = await program.account.ruinStaking.fetch(ruinStaking);
+    const staking = await program.account.ruinStaking.fetch(ruinStaking.publicKey);
 
     await program.rpc.stake(
-        new anchor.BN(100 * (10 ** 6)),
-        {
-          accounts: {
-            ruinStakingTerm: ruinStakingTerm,
-            ruinStaking: ruinStaking,
-            investor: staker.publicKey,
-            investorTokenAccount: stakerTokenAccount,
-            userPendingWithdrawl,
-            userStaked,
-            treasuryTokenAccount: staking.treasury,
-            systemProgram: anchor.web3.SystemProgram.programId,
-            tokenProgram: spl.TOKEN_PROGRAM_ID,
-            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-          },
-          signers: [
-            staker
-          ]
-        }
+      new anchor.BN(100 * (10 ** 6)),
+      {
+        accounts: {
+          ruinStakingTerm: ruinStakingTerm.publicKey,
+          ruinStaking: ruinStaking.publicKey,
+          investor: staker.publicKey,
+          investorTokenAccount: stakerTokenAccount,
+          userPendingWithdrawl,
+          userStaked,
+          treasuryTokenAccount: staking.treasury,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: spl.TOKEN_PROGRAM_ID,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        },
+        signers: [
+          staker
+        ]
+      }
     );
 
     await sleep(8 * 1000);
 
     await program.rpc.harvest(
-        {
-          accounts: {
-
-            ruinStakingTerm: ruinStakingTerm,
-            ruinStaking: ruinStaking,
-            investor: staker.publicKey,
-            userPendingWithdrawl,
-            userStaked,
-            treasuryTokenAccount: staking.treasury,
-            systemProgram: anchor.web3.SystemProgram.programId,
-            tokenProgram: spl.TOKEN_PROGRAM_ID,
-          },
-          signers: [
-            staker
-          ]
-        }
+      {
+        accounts: {
+          ruinStakingTerm: ruinStakingTerm.publicKey,
+          ruinStaking: ruinStaking.publicKey,
+          investor: staker.publicKey,
+          userPendingWithdrawl,
+          userStaked,
+          treasuryTokenAccount: staking.treasury,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: spl.TOKEN_PROGRAM_ID,
+        },
+        signers: [
+          staker
+        ]
+      }
     )
     const pendingWithdrawlResp = await program.account.pendingRewardWithdrawl.fetch(userPendingWithdrawl);
     const tokenBalanceBeforeClaim = await program.provider.connection.getTokenAccountBalance(stakerTokenAccount);
 
     await program.rpc.claimPendingReward(
-        {
-          accounts: {
-            ruinStakingTerm: ruinStakingTerm,
-            ruinStaking: ruinStaking,
-            investor: staker.publicKey,
-            distributorTokenAccount,
-            investorTokenAccount: stakerTokenAccount,
-            userPendingWithdrawl,
-            tokenProgram: spl.TOKEN_PROGRAM_ID,
-          },
-          signers: [
-            staker
-          ]
-        }
+      {
+        accounts: {
+          ruinStakingTerm: ruinStakingTerm.publicKey,
+          ruinStaking: ruinStaking.publicKey,
+          vaultAuthority,
+          investor: staker.publicKey,
+          distributorTokenAccount,
+          investorTokenAccount: stakerTokenAccount,
+          userPendingWithdrawl,
+          tokenProgram: spl.TOKEN_PROGRAM_ID,
+        },
+        signers: [
+          staker
+        ]
+      }
     )
 
     const tokenBalanceAfterClaim = await program.provider.connection.getTokenAccountBalance(stakerTokenAccount);

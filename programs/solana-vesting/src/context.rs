@@ -1,7 +1,8 @@
 use crate::error::*;
 use crate::account::*;
+use crate::{id};
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token::{Mint, Token, TokenAccount, Transfer, SetAuthority};
 
 
 #[derive(Accounts)]
@@ -9,29 +10,15 @@ use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
 pub struct InitializeStakingInfo<'info> {
     #[account(
         init,
-        seeds = [
-            b"staking",
-            ruin_staking_token.key().as_ref(),
-            ruin_staking_admin.key().as_ref(),
-            [lock_duration as u8].as_ref()
-        ],
         space = RuinStaking::LEN,
         payer = ruin_staking_admin, 
-        bump
     )]
     pub ruin_staking: Box<Account<'info, RuinStaking>>,
 
     #[account(
         init,
-        seeds = [
-            b"staking_term",
-            ruin_staking_token.key().as_ref(),
-            ruin_staking_admin.key().as_ref(),
-            [lock_duration as u8].as_ref()
-        ],
         space = RuinStakingTerm::LEN,
         payer = ruin_staking_admin,
-        bump
     )]
     pub ruin_staking_term: Box<Account<'info, RuinStakingTerm>>,
 
@@ -59,7 +46,7 @@ pub struct InitializeStakingInfo<'info> {
         payer = ruin_staking_admin,
         bump,
         token::mint = ruin_staking_token,
-        token::authority = ruin_staking,
+        token::authority = ruin_staking_admin,
     )]
     pub ruin_staking_distributor: Account<'info, TokenAccount>,
 
@@ -70,28 +57,17 @@ pub struct InitializeStakingInfo<'info> {
 
 #[derive(Accounts)]
 pub struct ClaimPendingReward<'info> {
-    #[account(
-        seeds = [
-            b"staking",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking.ruin_staking_bump
-    )]
+    #[account(owner = id())]
     pub ruin_staking: Account<'info, RuinStaking>,
 
     #[account(
-        seeds = [
-            b"staking_term",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking_term.ruin_staking_term_bump,
+        owner = id(),
         has_one = ruin_staking @ProgramErrorCode::InvalidStakingTerms
     )]
     pub ruin_staking_term: Account<'info, RuinStakingTerm>,
+
+    /// CHECK: No need to check right here
+    pub vault_authority: AccountInfo<'info>,
 
     #[account(
         mut,
@@ -133,24 +109,12 @@ pub struct ClaimPendingReward<'info> {
 #[derive(Accounts)]
 pub struct Withdraw<'info> {
     #[account(
-        seeds = [
-            b"staking",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking.ruin_staking_bump
+        owner = id(),
     )]
     pub ruin_staking: Account<'info, RuinStaking>,
 
     #[account(
-        seeds = [
-            b"staking_term",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking_term.ruin_staking_term_bump,
+        owner = id(),
         has_one = ruin_staking @ProgramErrorCode::InvalidStakingTerms
     )]
     pub ruin_staking_term: Account<'info, RuinStakingTerm>,
@@ -205,24 +169,12 @@ pub struct Withdraw<'info> {
 #[derive(Accounts)]
 pub struct Harvest<'info> {
     #[account(
-        seeds = [
-            b"staking",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking.ruin_staking_bump
+        owner = id(),
     )]
     pub ruin_staking: Account<'info, RuinStaking>,
 
     #[account(
-        seeds = [
-            b"staking_term",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking_term.ruin_staking_term_bump,
+        owner = id(),
         has_one = ruin_staking @ProgramErrorCode::InvalidStakingTerms
     )]
     pub ruin_staking_term: Account<'info, RuinStakingTerm>,
@@ -265,24 +217,12 @@ pub struct Harvest<'info> {
 #[derive(Accounts)]
 pub struct Stake<'info> {
     #[account(
-        seeds = [
-            b"staking",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking.ruin_staking_bump
+        owner = id(),
     )]
     pub ruin_staking: Account<'info, RuinStaking>,
 
     #[account(
-        seeds = [
-            b"staking_term",
-            ruin_staking.staking_token.key().as_ref(),
-            ruin_staking.staking_admin.key().as_ref(),
-            [ruin_staking_term.lock_duration as u8].as_ref()
-        ],
-        bump = ruin_staking_term.ruin_staking_term_bump,
+        owner = id(),
         has_one = ruin_staking @ProgramErrorCode::InvalidStakingTerms
     )]
     pub ruin_staking_term: Account<'info, RuinStakingTerm>,
@@ -338,6 +278,16 @@ pub struct Stake<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+impl<'info> InitializeStakingInfo<'info> {
+    pub fn into_set_authority_context(&self) -> CpiContext<'_, '_, '_, 'info, SetAuthority<'info>> {
+        let cpi_accounts = SetAuthority {
+            account_or_mint: self.ruin_staking_distributor.to_account_info().clone(),
+            current_authority: self.ruin_staking_admin.to_account_info().clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info().clone(), cpi_accounts)
+    }
+}
+
 impl<'info> Stake<'info> {
     pub fn into_transfer_token_to_treasury(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
         let cpi_accounts = Transfer {
@@ -355,7 +305,7 @@ impl<'info> ClaimPendingReward<'info> {
         let cpi_accounts = Transfer {
             from: self.distributor_token_account.to_account_info(),
             to: self.investor_token_account.to_account_info(),
-            authority: self.ruin_staking.to_account_info()
+            authority: self.vault_authority.to_account_info()
         };
 
         CpiContext::new(self.token_program.to_account_info().clone(), cpi_accounts)

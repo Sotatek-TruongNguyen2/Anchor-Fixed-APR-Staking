@@ -5,12 +5,15 @@ pub mod helpers;
 
 use account::*;
 use anchor_lang::prelude::*;
-use anchor_spl::token::{transfer, Mint, TokenAccount};
+use anchor_spl::token::{transfer, Mint, TokenAccount, set_authority};
+use spl_token::instruction::AuthorityType;
 use context::*;
 use error::*;
 use helpers::*;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("CqGFXYY5XASy5zX25P4Cdh4TzYD94eCtwexCM3Woswny");
+
+const VAULT_AUTHORITY_PDA_SEED: &[u8] = b"vault-authority";
 
 #[program]
 pub mod solana_vesting {
@@ -54,8 +57,14 @@ pub mod solana_vesting {
         ruin_staking_term.total_slot = total_slot;
 
         ruin_staking.distributor_bump = *ctx.bumps.get("ruin_staking_distributor").unwrap();
-        ruin_staking.ruin_staking_bump = *ctx.bumps.get("ruin_staking").unwrap();
-        ruin_staking_term.ruin_staking_term_bump = *ctx.bumps.get("ruin_staking_term").unwrap();
+
+        let (vault_authority, _vault_authority_bump) = Pubkey::find_program_address(&[VAULT_AUTHORITY_PDA_SEED], ctx.program_id);
+        
+        set_authority(
+            ctx.accounts.into_set_authority_context(),
+            AuthorityType::AccountOwner,
+            Some(vault_authority),
+        )?;
 
         Ok(())
     }
@@ -129,21 +138,14 @@ pub mod solana_vesting {
         let user_pending_withdrawl: &Account<PendingRewardWithdrawl> =
             &ctx.accounts.user_pending_withdrawl;
 
-        let staking_admin = ctx.accounts.ruin_staking.staking_admin.key();
-        let staking_token = ctx.accounts.ruin_staking.staking_token.key();
-
         if user_pending_withdrawl.claimable_at > clock.unix_timestamp
             && user_pending_withdrawl.pending_rewards > 0
         {
-            let seeds = &[
-                b"staking",
-                staking_token.as_ref(),
-                staking_admin.as_ref(),
-                &[ctx.accounts.ruin_staking_term.lock_duration as u8],
-                &[ctx.accounts.ruin_staking.ruin_staking_bump],
-            ];
+            let (_vault_authority, vault_authority_bump) =
+            Pubkey::find_program_address(&[VAULT_AUTHORITY_PDA_SEED], ctx.program_id);
 
-            let signer = &[&seeds[..]];
+            let authority_seeds = &[VAULT_AUTHORITY_PDA_SEED, &[vault_authority_bump]];
+            let signer = &[&authority_seeds[..]];
 
             transfer(
                 ctx.accounts
